@@ -85,6 +85,7 @@ module Bank
 		
 		def initialize(id,balance,open_date,owner)
 			raise ArgumentError, "You cannot open a bank account with a negative balance" unless balance.to_i>0
+			@minimum_balance=0
 			@balance=balance.to_i
 			#@id=generate_id
 			@id=id
@@ -106,7 +107,7 @@ module Bank
 			end
 
 
-			puts "You have a new bank account with id: #{@id} balance: $#{balance}"
+			puts "You have a new bank account with id: #{@id} balance: $#{balance/100.0}"
 			
 		end
 
@@ -147,8 +148,8 @@ module Bank
 
 		def withdraw(amount)
 			potential_balance=@balance-amount
-			if potential_balance<0
-				puts "Sorry, this withdrawl will cause the account to have a negative balance. Your current balance is: $#{@balance/100.0} please try again."
+			if potential_balance<@minimum_balance
+				puts "Sorry, this withdrawl will cause the account to have a balance below $#{@minimum_balance/100.0}. Please try again."
 				return balance
 			else
 				return @balance-=amount
@@ -165,6 +166,74 @@ module Bank
 		end
 	end
 	
+	class SavingsAccount < Account
+		def initialize(id,balance,open_date,owner)
+			raise ArgumentError, "You need at least $10 to open a bank account" unless balance.to_i>1000
+			super
+			@minimum_balance=1000
+		end
+		
+		def withdraw(amount)
+			fee=200
+			@balance-=fee
+			new_balance=super
+			if new_balance == @balance
+				@balance+=fee
+			end
+			return @balance
+		end
+
+		def add_interest_rate(rate)
+			interest=@balance*(rate/100)
+			@balance+=interest
+			return interest
+		end
+	end
+	
+	class CheckingAccount < Account
+		alias_method :parent_withdraw, :withdraw
+		
+		def initialize(id,balance,open_date,owner)
+			@minimum_balance=0
+			reset_checks
+			super
+		end
+
+		def withdraw(amount)
+			fee=100
+			@balance-=fee
+			new_balance=super
+			if new_balance == @balance
+				@balance+=fee
+			end
+			return @balance
+		end
+
+		def withdraw_using_check(amount)
+			original_min=@minimum_balance
+			@minimum_balance=-10
+			@checks+=1
+
+			if @checks>3
+				fee=200
+			else
+				fee=0
+			end
+
+			@balance-=fee
+			new_balance=parent_withdraw(amount)
+			if new_balance == @balance
+				@balance+=fee
+			end
+			return @balance
+
+			@minimum_balance=original_min
+		end
+
+		def reset_checks
+			@checks=0
+		end
+	end
 	
 end
 
@@ -213,37 +282,54 @@ end
 
 
 
-#make a fake version of me (an owner) using address and phone number from faker
+# #make a fake version of me (an owner) using address and phone number from faker
 #fake_name=[Faker::Name.first_name,Faker::Name.last_name]
 address={street1:Faker::Address.street_address, street2: "", city: Faker::Address.city, state: Faker::Address.state, zip:Faker::Address.zip}
 phone_number=Faker::PhoneNumber.phone_number
 quai=Bank::Owner.new("3333333",["Quai","Wentt"],address,phone_number)
 
-#open up 3 bank accounts under user quai
-#open up 1 bank account under a random fake owner 
-quaiAccount1=Bank::Account.new("1234567",10000,DateTime.now,quai)
-quaiAccount2=Bank::Account.new("1234099",10,DateTime.now,quai)
-quaiAccount3=Bank::Account.new("1234901",100,DateTime.now,quai)
-otherAccount4=Bank::Account.new("1123290",100,DateTime.now,Bank::Owner.generate_fake_owner)
+# #open up 3 bank accounts under user quai
+# #open up 1 bank account under a random fake owner 
+# quaiAccount1=Bank::Account.new("1234567",10000,DateTime.now,quai)
+# quaiAccount2=Bank::Account.new("1234099",10,DateTime.now,quai)
+# quaiAccount3=Bank::Account.new("1234901",100,DateTime.now,quai)
+# otherAccount4=Bank::Account.new("1123290",100,DateTime.now,Bank::Owner.generate_fake_owner)
 
-#test the .accounts method it should print out all the ids of quaiAccounts1-3 
-puts "To test .accounts method should print ids: 1234567,1234099, and 1234901"
-quai.accounts.each do |account|
-	puts account.id
-end
-
-
-#this should print out all of the ids including the one owned by fake owner
-puts "To test .all and .accounts. This should print all ids of bank accounts"
-Bank::Account.all.each do |account|
-	puts account.id
-end
+# #test the .accounts method it should print out all the ids of quaiAccounts1-3 
+# puts "To test .accounts method should print ids: 1234567,1234099, and 1234901"
+# quai.accounts.each do |account|
+# 	puts account.id
+# end
 
 
+# #this should print out all of the ids including the one owned by fake owner
+# puts "To test .all and .accounts. This should print all ids of bank accounts"
+# Bank::Account.all.each do |account|
+# 	puts account.id
+# end
 
+#To Test Savings account
+# save_quai = Bank::SavingsAccount.new("1234567",1201,DateTime.now,quai)
+# #puts save_quai.balance
+# # save_quai2 = Bank::SavingsAccount.new("7654321",1,DateTime.now,quai)
+# # puts save_quai2.balance
+# puts save_quai.withdraw(1)
+# puts save_quai.withdraw(1)
+# puts save_quai.add_interest_rate(0.25)
+# puts save_quai.balance
 
+#To test Checking Acount
+ch_quai = Bank::CheckingAccount.new("1234567",1201,DateTime.now,quai)
+puts ch_quai.withdraw(1)
+puts ch_quai.withdraw(100)
+puts ch_quai.withdraw(1)
+puts ch_quai.withdraw(1100)
+puts ch_quai.withdraw_using_check(1100)
 
-
+#The current issue is that withdraw_using_check acts like withdraw but isn't completely like it
+#and it isn't a child method of withdraw so I can't use super
+#hmm maybe use module here?
+#include or extend a module
 
 
 
