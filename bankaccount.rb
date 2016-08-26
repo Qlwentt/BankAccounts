@@ -2,6 +2,22 @@ require 'Faker'
 require 'csv'
 #require 'awesome_print'
 require 'time'
+require 'money'
+
+
+module Interest
+	def add_interest_rate(rate)
+		interest=(@balance*(rate/100)).to_i
+		@balance+=interest
+		return interest
+	end
+end
+
+class Fixnum
+	def to_money
+		return Money.new(self,"USD").format
+	end
+end
 
 module Bank
 	class Owner
@@ -15,13 +31,8 @@ module Bank
 			@phone_number=phone_number
 			@id=id #generate_id
 			@@owners<<self
-			
-			#probably need to make a separate method for this...
-			CSV.open("current_owners.csv","a") do |csv|
-				@@owners.each do |owner|
-					csv<<[owner.id,owner.name.last,owner.name.first,owner.address[:street1],owner.address[:city],owner.address[:state],owner.phone_number]
-				end
-			end
+			Owner.add_to_csv
+			#probably need to make a separate method for this...	
 		end
 
 		def self.create_from_csv(csv_name)
@@ -29,7 +40,7 @@ module Bank
 			owners_csv.shift
 			
 			owners_csv.each do |row|
-				Bank::Owner.new(row[0],row[1],row[2],row[3])
+				Owner.new(row[0],row[1],row[2],row[3])
 			end
 		end
 
@@ -47,17 +58,12 @@ module Bank
 			end
 		end
 
-		def accounts
-			my_accounts=[]
-			accountsCSV=CSV.open("account_owners.csv","r")
-			accountsCSV.shift #maybe I can do csv.open.shift
-			
-			accountsCSV.each do |row|
-				if @id==row[1]
-					my_accounts << Bank::Account.find(row[0])
+		def self.add_to_csv
+			CSV.open("current_owners.csv","a") do |csv|
+				@@owners.each do |owner|
+					csv<<[owner.id,owner.name.last,owner.name.first,owner.address[:street1],owner.address[:city],owner.address[:state],owner.phone_number]
 				end
 			end
-			return my_accounts
 		end
 
 		#this solution doesn't scale for systems in which I need a HUGE number of ids
@@ -75,10 +81,22 @@ module Bank
 			id=self.generate_id
 			Owner.new(id,[Faker::Name.first_name,Faker::Name.last_name],{street1:Faker::Address.street_address, street2: "", city: Faker::Address.city, state: Faker::Address.state, zip:Faker::Address.zip},Faker::PhoneNumber.phone_number)
 		end
+
+		def accounts
+			my_accounts=[]
+			accountsCSV=CSV.open("account_owners.csv","r")
+			accountsCSV.shift #maybe I can do csv.open.shift
+			
+			accountsCSV.each do |row|
+				if @id==row[1]
+					my_accounts << Bank::Account.find(row[0])
+				end
+			end
+			return my_accounts
+		end
 	end
 
 	class Account
-		
 		@@used_ids=[]
 		@@accounts=[]
 		attr_reader :balance, :id, :open_date, :owner
@@ -105,9 +123,7 @@ module Bank
 			CSV.open("current_accounts.csv", 'a') do |csv|
 				csv<<[@id,@balance,@open_date]
 			end
-
-
-			puts "You have a new bank account with id: #{@id} balance: $#{balance/100.0}"
+			puts "You have a new bank account with id: #{@id} balance: #{balance.to_money}"
 			
 		end
 
@@ -149,7 +165,7 @@ module Bank
 		def withdraw(amount)
 			potential_balance=@balance-amount
 			if potential_balance<@minimum_balance
-				puts "Sorry, this withdrawl will cause the account to have a balance below $#{@minimum_balance/100.0}. Please try again."
+				puts "Sorry, this withdrawl will cause the account to have a balance below #{minimum_balance.to_money}. Please try again."
 				return balance
 			else
 				return @balance-=amount
@@ -167,6 +183,7 @@ module Bank
 	end
 	
 	class SavingsAccount < Account
+		include Interest
 		def initialize(id,balance,open_date,owner)
 			raise ArgumentError, "You need at least $10 to open a bank account" unless balance.to_i>1000
 			super
@@ -182,12 +199,7 @@ module Bank
 			end
 			return @balance
 		end
-
-		def add_interest_rate(rate)
-			interest=@balance*(rate/100)
-			@balance+=interest
-			return interest
-		end
+		
 	end
 	
 	class CheckingAccount < Account
@@ -235,6 +247,73 @@ module Bank
 		end
 	end
 	
+	class MoneyMarketAccount<Account
+		attr_reader :transactions
+		include Interest
+		def initialize(id,balance,open_date,owner)
+			super
+			@transactions=0
+			@minimum_balance=1000000
+			raise ArgumentError, "You need at least $10,000 to open a money market account" unless balance.to_i>@minimum_balance-1
+			@locked_account=false
+		end
+
+		def withdraw(amount)
+			if not too_many_transactions?
+				if not @locked_account 
+					original_min=@minimum_balance
+					@minimum_balance=0
+					super
+					@minimum_balance=original_min
+					@transactions+=1
+					puts "The transaction went through"
+					if @balance<@minimum_balance
+						fee=10000
+						puts "You have been charged $100 for allowing your account balance to fall below the minimum balance"
+						@balance-=fee
+						lock_account
+					end
+				else
+					lock_account
+					return @balance
+				end
+				return @balance
+			end
+			return @balance
+		end
+
+		def lock_account
+			if not @locked_account
+				@locked_account=true
+			end
+			puts "Your account has been locked due to insufficient funds for further withdrawls. Your current balance is $#{@balance/100.0}"
+			puts "Please deposit #{(@minimum_balance-@balance).to_money} to unlock your account."
+		end
+
+		def deposit(amount)
+			if not too_many_transactions?
+				if @locked_account and (@balance+amount>=@minimum_balance)
+					@locked_account=false
+				else 
+					@transactions+=1
+				end
+				super
+			end
+			return @balance
+		end
+
+		def too_many_transactions?
+			if @transactions>6
+				puts "You cannot perform anymore transactions on this account until next month"
+				return true
+			end
+			return false
+		end
+
+		def reset_transactions
+			@transactions=0
+		end
+	end
 end
 
 #account=Bank::Account.new("1234567","500","2016-08-23T13:08:23-07:00",quai)
@@ -319,17 +398,28 @@ quai=Bank::Owner.new("3333333",["Quai","Wentt"],address,phone_number)
 # puts save_quai.balance
 
 #To test Checking Acount
-ch_quai = Bank::CheckingAccount.new("1234567",1201,DateTime.now,quai)
-puts ch_quai.withdraw(1)
-puts ch_quai.withdraw(100)
-puts ch_quai.withdraw(1)
-puts ch_quai.withdraw(1100)
-puts ch_quai.withdraw_using_check(1100)
+# ch_quai = Bank::CheckingAccount.new("1234567",1201,DateTime.now,quai)
+# puts ch_quai.withdraw(1)
+# puts ch_quai.withdraw(100)
+# puts ch_quai.withdraw(1)
+# puts ch_quai.withdraw(1100)
+# puts ch_quai.withdraw_using_check(1100)
 
-#The current issue is that withdraw_using_check acts like withdraw but isn't completely like it
-#and it isn't a child method of withdraw so I can't use super
-#hmm maybe use module here?
-#include or extend a module
+#To Test Money Market Account
+mm=Bank::MoneyMarketAccount.new("1234567",1000000,DateTime.now,quai)
+puts mm.balance.to_money
+
+puts mm.withdraw(100).to_money #transaction 1
+puts mm.withdraw(100).to_money	#this transaction didn't go through
+
+puts mm.deposit(100).to_money #transaction 2
+
+puts mm.deposit(10100).to_money 
+
+puts mm.transactions
+puts mm.add_interest_rate(0.25).to_money
+puts mm.balance.to_money
+
 
 
 
